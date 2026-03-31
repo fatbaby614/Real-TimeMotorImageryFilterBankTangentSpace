@@ -325,30 +325,6 @@ Generate statistical reports and significance tests.
 
 ---
 
-## Citation
-
-If you use this project, please cite:
-
-```bibtex
-@article{fbts2024,
-  title={Real-Time Motor Imagery BCI Using Filter Bank Tangent Space},
-  author={Your Name},
-  journal={IEEE Transactions on Neural Systems and Rehabilitation Engineering},
-  year={2024}
-}
-```
-
----
-
-## License
-
-This project is licensed under the MIT License.
-
----
-
-## Contact
-
-For questions or suggestions, please contact via GitHub Issues.
 
 ---
 
