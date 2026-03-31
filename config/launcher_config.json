@@ -1,0 +1,12 @@
+{
+  "subject_id": 1,
+  "session_id": 6,
+  "trials_per_class": 18,
+  "model_path": "D:/git_MotorImagery/MI_realtime_TangentSpace/models",
+  "data_path": "D:/git_MotorImagery/MI_realtime_TangentSpace/data",
+  "algorithm": "filterbank_tangent",
+  "device": "BlueCap",
+  "last_mat_files": [
+    "D:/git_MotorImagery/MI_realtime_TangentSpace/data/subject_1_session_5_3DPrintCap.mat"
+  ]
+}

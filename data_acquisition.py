@@ -99,8 +99,9 @@ def wait_for_space_to_start(screen: pygame.Surface, clock: pygame.time.Clock) ->
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect MI data via LSL and store MAT files")
     parser.add_argument("subject_id", type=int, nargs="?", default=1, help="Numeric subject identifier")
-    parser.add_argument("session_id", type=int, nargs="?", default=1, help="Numeric session identifier")
+    parser.add_argument("session_id", type=int, nargs="?", default=2, help="Numeric session identifier")
     parser.add_argument("trials_per_class", type=int, nargs="?", default=18, help="Number of trials per MI class")
+    parser.add_argument("--device", default="openbci_gel", help="Device name (e.g., openbci_gel, ultracortex)")
     parser.add_argument("--stream-name", default=cfg.LSL_STREAM_NAME, help="LSL stream name to resolve")
     parser.add_argument(
         "--rest-epochs",
@@ -426,12 +427,14 @@ def main() -> None:
         "sample_rate": cfg.SAMPLE_RATE_HZ,
         "labels": cfg.EVENT_LABELS,
         "timestamps": timestamps,
+        "device": args.device,
     }
 
     cfg.DATA_ROOT.mkdir(parents=True, exist_ok=True)
     mat_path = cfg.DATA_ROOT / cfg.MAT_FILE_TEMPLATE.format(
         subject_id=args.subject_id,
         session_id=args.session_id,
+        device=args.device,
     )
     savemat(
         mat_path,

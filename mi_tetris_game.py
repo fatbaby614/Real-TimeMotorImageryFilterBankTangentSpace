@@ -17,6 +17,16 @@ from algorithms.fbcsp import FilterBankCSPClassifier
 from algorithms_collection import FilterBankTangentSpace
 from config import mi_config as cfg
 
+
+def load_ea_matrix(model_dir: Path) -> Optional[np.ndarray]:
+    """Load EA whitening matrix if available."""
+    ea_path = Path(model_dir) / "ea_whitening_matrix.npy"
+    if ea_path.exists():
+        print(f"Loading EA whitening matrix from {ea_path}")
+        return np.load(ea_path)
+    return None
+
+
 LABEL_TO_ACTION = {
     0: "IDLE",
     1: "ROTATE",
@@ -378,7 +388,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_game(model: Union[FilterBankCSPClassifier, FilterBankTangentSpace], inlet: StreamInlet, args: argparse.Namespace) -> None:
+def run_game(
+    model: Union[FilterBankCSPClassifier, FilterBankTangentSpace], 
+    inlet: StreamInlet, 
+    args: argparse.Namespace,
+    ea_matrix: Optional[np.ndarray] = None
+) -> None:
     screen, clock = init_display()
     fonts = {
         "title": pygame.font.SysFont(cfg.FONT_NAME, 34),
@@ -440,6 +455,9 @@ def run_game(model: Union[FilterBankCSPClassifier, FilterBankTangentSpace], inle
                 and samples_since_inference >= step_samples
             ):
                 window = np.asarray(buffer[-window_samples:])
+                # Apply EA whitening if available
+                if ea_matrix is not None:
+                    window = (ea_matrix @ window.T).T
                 trial = np.expand_dims(window.T, axis=0)
                 probs = model.predict_proba(trial)[0]
                 best_idx = int(np.argmax(probs))
@@ -520,8 +538,15 @@ def main() -> None:
         print("Loading FilterBankCSP model...")
         model = FilterBankCSPClassifier.load(model_dir)
     
+    # Load EA whitening matrix if available
+    ea_matrix = load_ea_matrix(model_dir)
+    if ea_matrix is not None:
+        print("EA alignment enabled")
+    else:
+        print("No EA matrix found, using raw data")
+    
     inlet = connect_lsl(args.stream_name)
-    run_game(model, inlet, args)
+    run_game(model, inlet, args, ea_matrix)
 
 
 if __name__ == "__main__":

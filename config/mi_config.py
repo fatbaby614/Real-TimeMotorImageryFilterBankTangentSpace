@@ -20,7 +20,7 @@ CHUNK_LENGTH_SEC = 0.5  # 250 ms chunks for lower latency
 
 # Data collection / storage
 DATA_ROOT = Path("data")
-MAT_FILE_TEMPLATE = "subject_{subject_id}_session_{session_id}.mat"
+MAT_FILE_TEMPLATE = "subject_{subject_id}_session_{session_id}_{device}.mat"
 EVENT_LABELS = {
     0: "REST",
     1: "UP",
@@ -67,7 +67,7 @@ MODEL_ARTIFACT_BASENAME = "fbcsp_svm_model"
 SLIDING_WINDOW_SEC = 1.5
 WINDOW_STEP_SEC = 0.20
 MAJORITY_VOTE_WINDOW = 1  # number of recent predictions to smooth commands
-CONFIDENCE_THRESHOLD = 0.7  # require minimal SVM decision function magnitude
+CONFIDENCE_THRESHOLD = 0.6  # require minimal SVM decision function magnitude
 IDLE_COMMAND = "REST"
 
 # UI parameters

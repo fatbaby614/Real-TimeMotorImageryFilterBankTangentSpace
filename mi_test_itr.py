@@ -18,6 +18,15 @@ from algorithms_collection import FilterBankTangentSpace
 from config import mi_config as cfg
 
 
+def load_ea_matrix(model_dir: Path) -> Optional[np.ndarray]:
+    """Load EA whitening matrix if available."""
+    ea_path = Path(model_dir) / "ea_whitening_matrix.npy"
+    if ea_path.exists():
+        print(f"Loading EA whitening matrix from {ea_path}")
+        return np.load(ea_path)
+    return None
+
+
 LABEL_TO_COMMAND = {
     0: cfg.IDLE_COMMAND,
     1: "UP",      # Tongue
@@ -49,13 +58,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def itr_bits_per_trial(n_classes: int, accuracy: float) -> float:
-    """Calculate ITR per trial in bits."""
+    """Calculate ITR per trial in bits.
+    
+    ITR formula: ITR = log2(N) + P*log2(P) + (1-P)*log2((1-P)/(N-1))
+    where N is number of classes, P is accuracy.
+    """
     if n_classes < 2:
         return 0.0
-    p = max(1e-9, min(1.0 - 1e-9, accuracy))
-    q = (1.0 - p) / (n_classes - 1)
-    entropy = p * math.log2(p) + (n_classes - 1) * q * math.log2(max(q, 1e-9))
-    return math.log2(n_classes) + entropy
+    if accuracy <= 0:
+        return 0.0
+    if accuracy >= 1.0:
+        return math.log2(n_classes)
+    
+    p = accuracy
+    # ITR = log2(N) + P*log2(P) + (1-P)*log2((1-P)/(N-1))
+    # Note: the second and third terms are negative
+    itr = (math.log2(n_classes) + 
+           p * math.log2(p) + 
+           (1 - p) * math.log2((1 - p) / (n_classes - 1)))
+    return max(0.0, itr)
 
 def connect_lsl(stream_name: str) -> StreamInlet:
     """Connect to LSL stream."""
@@ -196,11 +217,60 @@ def majority_vote(history: Deque[str]) -> str:
         return cfg.IDLE_COMMAND
     return counts.most_common(1)[0][0]
 
-def run_mi_test(model: FilterBankTangentSpace, inlet: StreamInlet, n_trials_per_class: int, 
-                subject_id: int, save_dir: Path) -> None:
+def wait_for_start(screen: pygame.Surface, clock: pygame.time.Clock) -> None:
+    """Wait for user to press SPACE to start the test."""
+    font_big = pygame.font.SysFont(cfg.FONT_NAME, 72)
+    font_mid = pygame.font.SysFont(cfg.FONT_NAME, 36)
+    font_small = pygame.font.SysFont(cfg.FONT_NAME, 28)
+    
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                raise SystemExit
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    raise SystemExit
+                if event.key == pygame.K_SPACE:
+                    waiting = False
+        
+        screen.fill(cfg.BACKGROUND_COLOR)
+        width, height = cfg.SCREEN_SIZE
+        center_x, center_y = width // 2, height // 2
+        
+        # Draw title
+        title_text = font_big.render("Motor Imagery Test", True, (100, 200, 255))
+        title_rect = title_text.get_rect(center=(center_x, center_y - 150))
+        screen.blit(title_text, title_rect)
+        
+        # Draw instruction
+        instr_text = font_mid.render("Press SPACE to start", True, (255, 220, 100))
+        instr_rect = instr_text.get_rect(center=(center_x, center_y))
+        screen.blit(instr_text, instr_rect)
+        
+        # Draw additional info
+        info_text = font_small.render("Press ESC to exit", True, (180, 190, 210))
+        info_rect = info_text.get_rect(center=(center_x, center_y + 80))
+        screen.blit(info_text, info_rect)
+        
+        pygame.display.flip()
+        clock.tick(cfg.REFRESH_RATE_HZ)
+
+
+def run_mi_test(
+    model: FilterBankTangentSpace, 
+    inlet: StreamInlet, 
+    n_trials_per_class: int, 
+    subject_id: int, 
+    save_dir: Path,
+    ea_matrix: Optional[np.ndarray] = None
+) -> None:
     """Run motor imagery test with image cues."""
     screen, clock = init_pygame()
     cue_images = load_cue_images()
+    
+    # Wait for user to press SPACE to start
+    wait_for_start(screen, clock)
     
     # Generate trial schedule (15 trials per class by default)
     schedule = []
@@ -231,11 +301,16 @@ def run_mi_test(model: FilterBankTangentSpace, inlet: StreamInlet, n_trials_per_
     current_state = STATE_READY
     state_start_time = time.perf_counter()
     session_start = state_start_time
+    trial_start_time: float | None = None  # Track when each trial cycle starts
     
     # Time settings (in seconds)
     READY_TIME = 3  # Preparation time
     TRIAL_TIME = 4  # Trial time
     REST_TIME = 2  # Rest time
+    CORRECT_HOLD_TIME = 0.5  # Time to hold correct command before confirming (seconds)
+    
+    # Track when correct command was first detected
+    correct_detection_start: float | None = None
     
     # Test results
     test_results = {
@@ -269,19 +344,57 @@ def run_mi_test(model: FilterBankTangentSpace, inlet: StreamInlet, n_trials_per_
                 if state_elapsed >= READY_TIME:
                     current_state = STATE_TRIAL
                     state_start_time = now
+                    # Record trial cycle start time (for ITR calculation)
+                    if trial_start_time is None:
+                        trial_start_time = now - READY_TIME  # Include ready time
                     # Clear buffer before trial
                     buffer.clear()
                     samples_since_inference = 0
                     history.clear()
                     current_command = cfg.IDLE_COMMAND
                     current_confidence = 0.0
+                    correct_detection_start = None
             elif current_state == STATE_TRIAL:
-                if state_elapsed >= TRIAL_TIME:
-                    # Calculate trial result
-                    is_correct = current_command == cue_type
-                    if is_correct:
+                # Check if correct command detected during trial
+                if current_command == cue_type:
+                    # Correct command detected, start or continue hold timer
+                    if correct_detection_start is None:
+                        correct_detection_start = now
+                    elif now - correct_detection_start >= CORRECT_HOLD_TIME:
+                        # Correct command held for required time, confirm success
+                        is_correct = True
                         correct_count += 1
-                    trial_times.append(TRIAL_TIME)
+                        # Record full trial cycle time (ready + trial + rest) for ITR
+                        full_cycle_time = now - trial_start_time + REST_TIME
+                        trial_times.append(full_cycle_time)
+                        
+                        # Record trial result
+                        test_results["trials"].append({
+                            "cue": cue_type,
+                            "cue_label": CUE_LABELS.get(cue_type, cue_type),
+                            "prediction": current_command,
+                            "prediction_label": CUE_LABELS.get(current_command, current_command),
+                            "correct": is_correct,
+                            "confidence": current_confidence,
+                            "duration": state_elapsed
+                        })
+                        
+                        trial_idx += 1
+                        current_state = STATE_REST
+                        state_start_time = now
+                        trial_start_time = None  # Reset for next trial
+                        correct_detection_start = None
+                else:
+                    # Correct command lost, reset hold timer
+                    correct_detection_start = None
+                
+                # Check for timeout
+                if state_elapsed >= TRIAL_TIME:
+                    # Trial time expired without correct detection
+                    is_correct = False
+                    # Record full trial cycle time (ready + trial + rest) for ITR
+                    full_cycle_time = now - trial_start_time + REST_TIME
+                    trial_times.append(full_cycle_time)
                     
                     # Record trial result
                     test_results["trials"].append({
@@ -297,6 +410,8 @@ def run_mi_test(model: FilterBankTangentSpace, inlet: StreamInlet, n_trials_per_
                     trial_idx += 1
                     current_state = STATE_REST
                     state_start_time = now
+                    trial_start_time = None  # Reset for next trial
+                    correct_detection_start = None
             elif current_state == STATE_REST:
                 if state_elapsed >= REST_TIME:
                     if trial_idx < total_trials:
@@ -318,6 +433,9 @@ def run_mi_test(model: FilterBankTangentSpace, inlet: StreamInlet, n_trials_per_
                 # Make prediction
                 if len(buffer) >= window_samples and samples_since_inference >= step_samples:
                     window = np.asarray(buffer[-window_samples:])
+                    # Apply EA whitening if available
+                    if ea_matrix is not None:
+                        window = (ea_matrix @ window.T).T
                     trial_data = np.expand_dims(window.T, axis=0)
                     probs = model.predict_proba(trial_data)[0]
                     best_idx = int(np.argmax(probs))
@@ -427,12 +545,19 @@ def main() -> None:
     model = FilterBankTangentSpace.load_model(model_path)
     print("Model loaded successfully!")
     
+    # Load EA whitening matrix if available
+    ea_matrix = load_ea_matrix(args.model_dir)
+    if ea_matrix is not None:
+        print("EA alignment enabled")
+    else:
+        print("No EA matrix found, using raw data")
+    
     # Connect to LSL stream
     inlet = connect_lsl(args.stream_name)
     
     # Run MI test
     save_dir = Path(args.save_dir)
-    run_mi_test(model, inlet, args.trials, args.subject_id, save_dir)
+    run_mi_test(model, inlet, args.trials, args.subject_id, save_dir, ea_matrix)
 
 
 if __name__ == "__main__":

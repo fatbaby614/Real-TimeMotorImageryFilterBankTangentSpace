@@ -17,6 +17,22 @@ from algorithms_collection import FilterBankTangentSpace
 from config import mi_config as cfg
 
 
+def load_ea_matrix(model_dir: Path) -> Optional[np.ndarray]:
+    """Load EA whitening matrix if available.
+    
+    Args:
+        model_dir: Path to model directory
+        
+    Returns:
+        EA whitening matrix or None if not found
+    """
+    ea_path = Path(model_dir) / "ea_whitening_matrix.npy"
+    if ea_path.exists():
+        print(f"Loading EA whitening matrix from {ea_path}")
+        return np.load(ea_path)
+    return None
+
+
 LABEL_TO_COMMAND = {
     0: cfg.IDLE_COMMAND,
     1: "UP",
@@ -110,6 +126,7 @@ def run_itr_mode(
     inlet: StreamInlet,
     n_classes: int,
     trials_per_class: int,
+    ea_matrix: Optional[np.ndarray] = None,
 ) -> None:
     """Present MI targets one by one and compute ITR at the end."""
     screen, clock = init_pygame()
@@ -160,6 +177,9 @@ def run_itr_mode(
 
             if len(buffer) >= window_samples and samples_since_inference >= step_samples:
                 window = np.asarray(buffer[-window_samples:])
+                # Apply EA whitening if available
+                if ea_matrix is not None:
+                    window = (ea_matrix @ window.T).T
                 trial_data = np.expand_dims(window.T, axis=0)
                 probs = model.predict_proba(trial_data)[0]
                 best_idx  = int(np.argmax(probs))
@@ -284,7 +304,11 @@ def majority_vote(history: Deque[str]) -> str:
     return counts.most_common(1)[0][0]
 
 
-def run_loop(model: Union[FilterBankCSPClassifier, FilterBankTangentSpace], inlet: StreamInlet) -> None:
+def run_loop(
+    model: Union[FilterBankCSPClassifier, FilterBankTangentSpace], 
+    inlet: StreamInlet,
+    ea_matrix: Optional[np.ndarray] = None
+) -> None:
     screen, clock = init_pygame()
     buffer: List[List[float]] = []
     samples_since_inference = 0
@@ -311,6 +335,9 @@ def run_loop(model: Union[FilterBankCSPClassifier, FilterBankTangentSpace], inle
 
             if len(buffer) >= window_samples and samples_since_inference >= step_samples:
                 window = np.asarray(buffer[-window_samples:])
+                # Apply EA whitening if available
+                if ea_matrix is not None:
+                    window = (ea_matrix @ window.T).T
                 trial = np.expand_dims(window.T, axis=0)
                 probs = model.predict_proba(trial)[0]
                 best_idx = int(np.argmax(probs))
@@ -354,12 +381,19 @@ def main() -> None:
         print("Loading FilterBankCSP model...")
         model = FilterBankCSPClassifier.load(model_dir)
     
+    # Load EA whitening matrix if available
+    ea_matrix = load_ea_matrix(model_dir)
+    if ea_matrix is not None:
+        print("EA alignment enabled")
+    else:
+        print("No EA matrix found, using raw data")
+    
     inlet = connect_lsl(args.stream_name)
     if args.itr_mode:
         n_classes = len(LABEL_TO_COMMAND) - 1  # exclude IDLE
-        run_itr_mode(model, inlet, n_classes, args.itr_trials)
+        run_itr_mode(model, inlet, n_classes, args.itr_trials, ea_matrix)
     else:
-        run_loop(model, inlet)
+        run_loop(model, inlet, ea_matrix)
 
 
 if __name__ == "__main__":
