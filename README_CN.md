@@ -316,32 +316,6 @@ python experiments/statistical_analysis.py
 
 ---
 
-## 引用
-
-如果您使用了本项目，请引用：
-
-```bibtex
-@article{fbts2024,
-  title={Real-Time Motor Imagery BCI Using Filter Bank Tangent Space},
-  author={Your Name},
-  journal={IEEE Transactions on Neural Systems and Rehabilitation Engineering},
-  year={2024}
-}
-```
-
----
-
-## 许可证
-
-本项目采用 MIT 许可证。
-
----
-
-## 联系方式
-
-如有问题或建议，请通过GitHub Issues联系。
-
----
 
 ## 致谢
 
