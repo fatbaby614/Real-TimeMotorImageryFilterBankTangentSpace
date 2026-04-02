@@ -4,6 +4,10 @@
 
 This project implements a real-time Motor Imagery (MI) Brain-Computer Interface (BCI) system based on the **Filter Bank Tangent Space (FBTS)** algorithm. The system processes Electroencephalography (EEG) signals using Riemannian geometry methods, achieving efficient and lightweight four-class motor imagery recognition for real-time game control, assistive device control, and other applications.
 
+
+![Maze](MI-Maze.gif "bci motory imagery play maze game")
+![Tetris](MI-tetris.gif "bci motory imagery play tetris game")
+
 ### Key Features
 
 - **Efficient Algorithm**: Based on Riemannian geometry tangent space projection, no need for large training datasets like deep learning
