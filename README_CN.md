@@ -3,8 +3,10 @@
 ## 项目简介
 
 本项目实现了一个基于**滤波器组切空间(Filter Bank Tangent Space, FBTS)**算法的实时运动想象(Motor Imagery, MI)脑机接口(Brain-Computer Interface, BCI)系统。该系统通过黎曼几何方法处理脑电信号(EEG)，实现了高效、轻量级的四分类运动想象识别，可应用于实时游戏控制、辅助设备控制等场景。
+
 ![Maze](MI-Maze.gif "bci motory imagery play maze game")
 ![Tetris](MI-tetris.gif "bci motory imagery play tetris game")
+
 ### 核心特点
 
 - **高效算法**：基于黎曼几何的切空间投影，无需深度学习的大量训练数据
