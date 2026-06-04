@@ -209,14 +209,15 @@ def plot_tsne_visualization(features, labels, algorithm_name, subject_id, datase
     
     n_classes = len(np.unique(labels))
     
-    # Generate class labels based on dataset and number of classes
     if n_classes == 2:
-        class_names = ['Hand', 'Foot']
+        class_names = ['Left Hand', 'Right Hand']
     elif n_classes == 4:
         if 'PhysionetMI' in dataset_name:
             class_names = ['Left Hand', 'Right Hand', 'Both Hands', 'Both Feet']
         else:
-            class_names = ['Left', 'Right', 'Foot', 'Tongue']
+            class_names = ['Left Hand', 'Right Hand', 'Feet', 'Tongue']
+    elif n_classes == 5:
+        class_names = ['Rest', 'Left Hand', 'Right Hand', 'Feet', 'Tongue']
     else:
         class_names = [f'Class {i}' for i in range(n_classes)]
     
@@ -319,12 +320,12 @@ def plot_tsne_comparison(features_dict, labels, algorithm_names, subject_id, dat
     
     # Generate class labels based on dataset and number of classes
     if n_classes == 2:
-        class_names = ['Hand', 'Foot']
+        class_names = ['Left Hand', 'Right Hand']
     elif n_classes == 4:
         if 'PhysionetMI' in dataset_name:
             class_names = ['Left Hand', 'Right Hand', 'Both Hands', 'Both Feet']
         else:
-            class_names = ['Left', 'Right', 'Foot', 'Tongue']
+            class_names = ['Left Hand', 'Right Hand', 'Feet', 'Tongue']
     else:
         class_names = [f'Class {i}' for i in range(n_classes)]
     

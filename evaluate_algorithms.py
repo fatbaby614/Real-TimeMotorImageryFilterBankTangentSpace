@@ -13,7 +13,7 @@ import time
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix
 import os
-from config.algorithms_config import RESULTS_PATH, RANDOM_STATE, N_SPLITS, get_timestamped_filename, get_results_path
+from config.algorithms_config import RESULTS_PATH, RANDOM_STATE, N_SPLITS
 from algorithms_collection import get_algorithm
 import data_loader_moabb as data_loader
 import visualization
@@ -209,128 +209,54 @@ def check_gpu():
 
 
 def evaluate_subject(subject_id, algorithms, use_test_data=False, dataset='BCI_IV_2A', epochs=300, save_model=False, load_model=False, model_dir='models', extract_features=False):
-    """评估单个受试者"""
+    """评估单个受试者
+    
+    When use_test_data=True: Cross-session evaluation.
+        Train on Session 1, test on Session 2 (no CV).
+    When use_test_data=False: Within-session evaluation.
+        5-fold CV on Session 1.
+    """
     print(f"\n{'=' * 80}")
     print(f"Evaluating Subject {subject_id} on {dataset}")
     print(f"{'=' * 80}")
     
-    X, y, meta = data_loader.load_single_subject_moabb(subject_id, use_test_data=use_test_data, dataset=dataset)
-    
-    n_samples, n_channels, n_times = X.shape
-    n_classes = len(np.unique(y))
-    
-    print(f"\nData loaded:")
-    print(f"  Samples: {n_samples}")
-    print(f"  Channels: {n_channels}")
-    print(f"  Time points: {n_times}")
-    print(f"  Classes: {n_classes}")
-    
     results = []
     features_dict = {} if extract_features else None
     
-    for algo_name in algorithms:
-        print(f"\n{'=' * 60}")
-        print(f"Evaluating algorithm: {algo_name}")
-        print(f"{'=' * 60}")
+    if use_test_data:
+        # ========== CROSS-SESSION EVALUATION ==========
+        # Train on Session 1, test on Session 2
+        print("\n  Cross-session protocol: Session 1 -> Session 2")
         
-        skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
+        X_train, y_train, _ = data_loader.load_single_subject_moabb(
+            subject_id, use_test_data=False, dataset=dataset
+        )
+        X_test, y_test, _ = data_loader.load_single_subject_moabb(
+            subject_id, use_test_data=True, dataset=dataset
+        )
         
-        for fold_idx, (train_idx, test_idx) in enumerate(skf.split(X, y)):
-            X_train, X_test = X[train_idx], X[test_idx]
-            y_train, y_test = y[train_idx], y[test_idx]
+        n_channels = X_train.shape[1]
+        n_times = X_train.shape[2]
+        n_classes = len(np.unique(y_train))
+        
+        print(f"\nTraining data: {X_train.shape}, {len(np.unique(y_train))} classes")
+        print(f"Test data:     {X_test.shape}, {len(np.unique(y_test))} classes")
+        
+        for algo_name in algorithms:
+            print(f"\n{'=' * 60}")
+            print(f"Evaluating algorithm: {algo_name}")
+            print(f"{'=' * 60}")
             
-            # 模型保存/加载路径
-            model_path = os.path.join(model_dir, f'{dataset}_subject{subject_id}_{algo_name}_fold{fold_idx+1}.pt')
+            model = get_algorithm(algo_name, n_channels, n_times, n_classes)
             
-            if load_model and os.path.exists(model_path):
-                print(f"  Loading model from {model_path}")
-                # 根据算法名称选择相应的加载方法
-                if algo_name == 'CSP+LDA':
-                    from algorithms_collection import CSPLDA
-                    model = CSPLDA.load_model(model_path)
-                elif algo_name == 'CSP+SVM':
-                    from algorithms_collection import CSPSVM
-                    model = CSPSVM.load_model(model_path)
-                elif algo_name == 'FBCSP':
-                    from algorithms_collection import FBCSP
-                    model = FBCSP.load_model(model_path)
-                elif algo_name in ['FilterBankTangentSpace', 'FilterBankTangentSpace+SVM', 
-                                  'FilterBankTangentSpace+LDA', 'FilterBankTangentSpace+RF']:
-                    from algorithms_collection import FilterBankTangentSpace
-                    model = FilterBankTangentSpace.load_model(model_path)
-                elif algo_name == 'MDM':
-                    from algorithms_collection import MDM
-                    model = MDM.load_model(model_path)
-                elif algo_name == 'RiemannTangentSpace':
-                    from algorithms_collection import RiemannTangentSpace
-                    model = RiemannTangentSpace.load_model(model_path)
-                elif algo_name == 'EEGNet':
-                    from algorithms_collection import EEGNet
-                    model = EEGNet.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'EEGNex':
-                    from algorithms_collection import EEGNexClassifier
-                    model = EEGNexClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'EEG-Inception':
-                    from algorithms_collection import EEGInceptionClassifier
-                    model = EEGInceptionClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'ShallowFBCSPNet':
-                    from algorithms_collection import ShallowFBCSPNetClassifier
-                    model = ShallowFBCSPNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'MSVTNet':
-                    from algorithms_collection import MSVTNetClassifier
-                    model = MSVTNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'IFNet':
-                    from algorithms_collection import IFNetClassifier
-                    model = IFNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'EEGConformer':
-                    from algorithms_collection import EEGConformerClassifier
-                    model = EEGConformerClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'CTNet':
-                    from algorithms_collection import CTNetClassifier
-                    model = CTNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'ATCNet':
-                    from algorithms_collection import ATCNetClassifier
-                    model = ATCNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'EEGSimpleConv':
-                    from algorithms_collection import EEGSimpleConvClassifier
-                    model = EEGSimpleConvClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'EEGTCNet':
-                    from algorithms_collection import EEGTCNetClassifier
-                    model = EEGTCNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'SincShallowNet':
-                    from algorithms_collection import SincShallowNetClassifier
-                    model = SincShallowNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                elif algo_name == 'EEGITNet':
-                    from algorithms_collection import EEGITNetClassifier
-                    model = EEGITNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
-                else:
-                    model = get_algorithm(algo_name, n_channels, n_times, n_classes)
-                    # 检查模型的fit方法是否接受epochs参数
-                    import inspect
-                    fit_signature = inspect.signature(model.fit)
-                    if 'epochs' in fit_signature.parameters:
-                        model.fit(X_train, y_train, epochs=epochs)
-                    else:
-                        model.fit(X_train, y_train)
-                train_time = 0
+            start_time = time.time()
+            import inspect
+            fit_signature = inspect.signature(model.fit)
+            if 'epochs' in fit_signature.parameters:
+                model.fit(X_train, y_train, epochs=epochs)
             else:
-                model = get_algorithm(algo_name, n_channels, n_times, n_classes)
-                
-                start_time = time.time()
-                # 检查模型的fit方法是否接受epochs参数
-                import inspect
-                fit_signature = inspect.signature(model.fit)
-                if 'epochs' in fit_signature.parameters:
-                    model.fit(X_train, y_train, epochs=epochs)
-                else:
-                    model.fit(X_train, y_train)
-                train_time = time.time() - start_time
-                
-                # 保存模型
-                if save_model:
-                    os.makedirs(model_dir, exist_ok=True)
-                    print(f"  Saving model to {model_path}")
-                    model.save_model(model_path)
+                model.fit(X_train, y_train)
+            train_time = time.time() - start_time
             
             y_pred = model.predict(X_test)
             
@@ -338,25 +264,169 @@ def evaluate_subject(subject_id, algorithms, use_test_data=False, dataset='BCI_I
             kappa = cohen_kappa_score(y_test, y_pred)
             cm = confusion_matrix(y_test, y_pred, labels=list(range(n_classes))).tolist()
             
-            print(f"  Fold {fold_idx + 1}/{N_SPLITS}")
-            print(f"    Accuracy: {accuracy:.4f}, Kappa: {kappa:.4f}")
+            print(f"    Accuracy: {accuracy:.4f}, Kappa: {kappa:.4f}, Time: {train_time:.2f}s")
             
             results.append({
                 'dataset': dataset,
                 'algorithm': algo_name,
                 'subject': subject_id,
-                'fold': fold_idx + 1,
+                'fold': 1,
                 'accuracy': accuracy,
                 'kappa': kappa,
                 'train_time': train_time,
                 'confusion_matrix': cm
             })
             
-            # Extract features for t-SNE visualization (only for the first fold)
-            if extract_features and fold_idx == 0:
+            if extract_features:
                 print(f"  Extracting features for t-SNE visualization...")
-                features = extract_features_from_model(model, X, algo_name)
+                features = extract_features_from_model(model, X_train, algo_name)
                 features_dict[algo_name] = features
+    else:
+        # ========== WITHIN-SESSION EVALUATION (5-fold CV) ==========
+        print("\n  Within-session protocol: 5-fold CV on Session 1")
+        
+        X, y, meta = data_loader.load_single_subject_moabb(
+            subject_id, use_test_data=False, dataset=dataset
+        )
+        
+        n_samples, n_channels, n_times = X.shape
+        n_classes = len(np.unique(y))
+        
+        print(f"\nData loaded:")
+        print(f"  Samples: {n_samples}")
+        print(f"  Channels: {n_channels}")
+        print(f"  Time points: {n_times}")
+        print(f"  Classes: {n_classes}")
+        
+        for algo_name in algorithms:
+            print(f"\n{'=' * 60}")
+            print(f"Evaluating algorithm: {algo_name}")
+            print(f"{'=' * 60}")
+            
+            skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
+            
+            for fold_idx, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
+                
+                # 模型保存/加载路径
+                model_path = os.path.join(model_dir, f'{dataset}_subject{subject_id}_{algo_name}_fold{fold_idx+1}.pt')
+                
+                if load_model and os.path.exists(model_path):
+                    print(f"  Loading model from {model_path}")
+                    # 根据算法名称选择相应的加载方法
+                    if algo_name == 'CSP+LDA':
+                        from algorithms_collection import CSPLDA
+                        model = CSPLDA.load_model(model_path)
+                    elif algo_name == 'CSP+SVM':
+                        from algorithms_collection import CSPSVM
+                        model = CSPSVM.load_model(model_path)
+                    elif algo_name == 'FBCSP':
+                        from algorithms_collection import FBCSP
+                        model = FBCSP.load_model(model_path)
+                    elif algo_name in ['FilterBankTangentSpace', 'FilterBankTangentSpace+SVM', 
+                                      'FilterBankTangentSpace+LDA', 'FilterBankTangentSpace+RF']:
+                        from algorithms_collection import FilterBankTangentSpace
+                        model = FilterBankTangentSpace.load_model(model_path)
+                    elif algo_name == 'MDM':
+                        from algorithms_collection import MDM
+                        model = MDM.load_model(model_path)
+                    elif algo_name == 'RiemannTangentSpace':
+                        from algorithms_collection import RiemannTangentSpace
+                        model = RiemannTangentSpace.load_model(model_path)
+                    elif algo_name == 'EEGNet':
+                        from algorithms_collection import EEGNet
+                        model = EEGNet.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'EEGNex':
+                        from algorithms_collection import EEGNexClassifier
+                        model = EEGNexClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'EEG-Inception':
+                        from algorithms_collection import EEGInceptionClassifier
+                        model = EEGInceptionClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'ShallowFBCSPNet':
+                        from algorithms_collection import ShallowFBCSPNetClassifier
+                        model = ShallowFBCSPNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'MSVTNet':
+                        from algorithms_collection import MSVTNetClassifier
+                        model = MSVTNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'IFNet':
+                        from algorithms_collection import IFNetClassifier
+                        model = IFNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'EEGConformer':
+                        from algorithms_collection import EEGConformerClassifier
+                        model = EEGConformerClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'CTNet':
+                        from algorithms_collection import CTNetClassifier
+                        model = CTNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'ATCNet':
+                        from algorithms_collection import ATCNetClassifier
+                        model = ATCNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'EEGSimpleConv':
+                        from algorithms_collection import EEGSimpleConvClassifier
+                        model = EEGSimpleConvClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'EEGTCNet':
+                        from algorithms_collection import EEGTCNetClassifier
+                        model = EEGTCNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'SincShallowNet':
+                        from algorithms_collection import SincShallowNetClassifier
+                        model = SincShallowNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    elif algo_name == 'EEGITNet':
+                        from algorithms_collection import EEGITNetClassifier
+                        model = EEGITNetClassifier.load_model(model_path, n_channels, n_times, n_classes)
+                    else:
+                        model = get_algorithm(algo_name, n_channels, n_times, n_classes)
+                        # 检查模型的fit方法是否接受epochs参数
+                        import inspect
+                        fit_signature = inspect.signature(model.fit)
+                        if 'epochs' in fit_signature.parameters:
+                            model.fit(X_train, y_train, epochs=epochs)
+                        else:
+                            model.fit(X_train, y_train)
+                    train_time = 0
+                else:
+                    model = get_algorithm(algo_name, n_channels, n_times, n_classes)
+                    
+                    start_time = time.time()
+                    # 检查模型的fit方法是否接受epochs参数
+                    import inspect
+                    fit_signature = inspect.signature(model.fit)
+                    if 'epochs' in fit_signature.parameters:
+                        model.fit(X_train, y_train, epochs=epochs)
+                    else:
+                        model.fit(X_train, y_train)
+                    train_time = time.time() - start_time
+                    
+                    # 保存模型
+                    if save_model:
+                        os.makedirs(model_dir, exist_ok=True)
+                        print(f"  Saving model to {model_path}")
+                        model.save_model(model_path)
+                
+                y_pred = model.predict(X_test)
+                
+                accuracy = accuracy_score(y_test, y_pred)
+                kappa = cohen_kappa_score(y_test, y_pred)
+                cm = confusion_matrix(y_test, y_pred, labels=list(range(n_classes))).tolist()
+                
+                print(f"  Fold {fold_idx + 1}/{N_SPLITS}")
+                print(f"    Accuracy: {accuracy:.4f}, Kappa: {kappa:.4f}")
+                
+                results.append({
+                    'dataset': dataset,
+                    'algorithm': algo_name,
+                    'subject': subject_id,
+                    'fold': fold_idx + 1,
+                    'accuracy': accuracy,
+                    'kappa': kappa,
+                    'train_time': train_time,
+                    'confusion_matrix': cm
+                })
+                
+                # Extract features for t-SNE visualization (only for the first fold)
+                if extract_features and fold_idx == 0:
+                    print(f"  Extracting features for t-SNE visualization...")
+                    features = extract_features_from_model(model, X, algo_name)
+                    features_dict[algo_name] = features
     
     # 确保返回的是正确的格式
     if extract_features:
@@ -413,50 +483,42 @@ def parse_subjects(subjects_str, dataset='BCI_IV_2A'):
     - "1~9" 表示 1 到 9
     - "1,3,5~7" 表示 1, 3, 5, 6, 7
     - "1 2 3" 表示 1, 2, 3
+    - "1~9 11 13~15" 表示范围、空格混合格式
     """
     subjects = []
     
     # 处理 "all" 关键字
     if subjects_str.lower() == 'all':
-        # 根据数据集确定所有受试者的范围
         if dataset == 'BCI_IV_2A':
-            subjects = list(range(1, 10))  # 1-9
+            subjects = list(range(1, 10))
         elif dataset == 'PhysionetMI':
-            subjects = list(range(1, 110))  # 1-109
+            subjects = list(range(1, 110))
         elif dataset == 'Schirrmeister2017':
-            subjects = list(range(1, 15))  # 1-14
+            subjects = list(range(1, 15))
         else:
             raise ValueError(f"Unknown dataset: {dataset}")
         return subjects
     
-    # 处理逗号分隔的字符串
-    if ',' in subjects_str:
-        parts = subjects_str.split(',')
-    else:
-        parts = [subjects_str]
+    # 用空格分隔成多个 token（如 "1 2 3" 或 "1~9 11 13~15"）
+    tokens = subjects_str.replace(',', ' ').split()
     
-    for part in parts:
-        part = part.strip()
-        if '~' in part:
-            # 处理范围，如 "1~9"
-            start, end = map(int, part.split('~'))
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        if '~' in token:
+            start, end = map(int, token.split('~'))
             subjects.extend(range(start, end + 1))
-        elif ' ' in part:
-            # 处理空格分隔的数字，如 "1 2 3"
-            subjects.extend(map(int, part.split()))
         else:
-            # 处理单个数字
-            subjects.append(int(part))
+            subjects.append(int(token))
     
-    # 去重并排序
-    subjects = sorted(list(set(subjects)))
-    return subjects
+    return sorted(set(subjects))
 
 
 def main():
     parser = argparse.ArgumentParser(description='BCI IV 2A Motor Imagery Algorithm Evaluation v4 (MOABB)')
-    parser.add_argument('--subjects', type=str, default='1~9',
-                        help='Subject range or list (e.g., "all", "1~9", "1,3,5~7", or "1 2 3")')
+    parser.add_argument('--subjects', type=str, nargs='*', default=['1~9'],
+                        help='Subject range or list (e.g., "all", "1~9", "1,3,5~7", "1 2 3", "1~20")')
     parser.add_argument('--subject', type=int, default=None,
                         help='Single subject ID - alternative to --subjects')
     parser.add_argument('--algorithms', type=str, nargs='+', 
@@ -466,8 +528,10 @@ def main():
                         'MSVTNet', 'IFNet', 'EEGConformer', 'CTNet', 'ATCNet', 'EEGSimpleConv', 'EEGTCNet',
                          'SincShallowNet', 'EEGITNet'],
                         help='List of algorithms to evaluate')
-    parser.add_argument('--use-test-data', action='store_true',
-                        help='Use test data (E) instead of training data (T)')
+    parser.add_argument('--use-test-data', action='store_true', default=True,
+                        help='Use test data (Session 2) instead of training data (Session 1). Default: True (cross-session evaluation)')
+    parser.add_argument('--use-train-data', action='store_true',
+                        help='Use training data (Session 1) for within-session evaluation (overrides --use-test-data)')
     parser.add_argument('--plot', action='store_true',
                         help='Generate and show plots')
     parser.add_argument('--check-gpu', action='store_true',
@@ -488,6 +552,10 @@ def main():
     
     args = parser.parse_args()
     
+    # Handle --use-train-data override
+    if args.use_train_data:
+        args.use_test_data = False
+    
     if args.check_gpu:
         check_gpu()
         return
@@ -496,7 +564,12 @@ def main():
         args.subjects = [args.subject]
     else:
         # 解析受试者范围
-        args.subjects = parse_subjects(args.subjects, dataset=args.dataset)
+        if isinstance(args.subjects, list):
+            # nargs='*' 返回 list，需要合并成一个字符串
+            subjects_str = ' '.join(args.subjects) if args.subjects else '1~9'
+        else:
+            subjects_str = args.subjects
+        args.subjects = parse_subjects(subjects_str, dataset=args.dataset)
     
     print("=" * 80)
     print("BCI IV 2A Motor Imagery Algorithm Evaluation System v4 (MOABB)")
@@ -505,7 +578,8 @@ def main():
     print(f"  Dataset: {args.dataset}")
     print(f"  Algorithms: {', '.join(args.algorithms)}")
     print(f"  Subjects: {', '.join(map(str, args.subjects))}")
-    print(f"  Data type: {'Test (E)' if args.use_test_data else 'Training (T)'}")
+    print(f"  Protocol: {'Cross-session (Session 1 -> Session 2)' if args.use_test_data else 'Within-session (Session 1 CV)'}")
+    print(f"  Data type: {'Test (Session 2)' if args.use_test_data else 'Training (Session 1)'}")
     print(f"  Training: {args.epochs} epochs")
     print(f"  Data loader: MOABB")
     
@@ -542,13 +616,16 @@ def main():
     dataset_suffix = args.dataset.lower().replace('_', '')
     timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
     
-    results_filename = get_timestamped_filename(f'evaluation_results_{dataset_suffix}', 'csv')
-    summary_filename = get_timestamped_filename(f'evaluation_summary_{dataset_suffix}', 'csv')
-    subject_summary_filename = get_timestamped_filename(f'evaluation_summary_by_subject_{dataset_suffix}', 'csv')
-    
-    results_df.to_csv(os.path.join(RESULTS_PATH, results_filename), index=False)
-    summary_df.to_csv(os.path.join(RESULTS_PATH, summary_filename), index=False)
-    subject_summary_df.to_csv(os.path.join(RESULTS_PATH, subject_summary_filename), index=False)
+    # Only save evaluation results CSV when not in t-SNE mode,
+    # to avoid t-SNE (which runs fewer algorithms) shadowing the main evaluation results
+    if not args.tsne:
+        results_filename = f'evaluation_results_{dataset_suffix}_{timestamp}.csv'
+        summary_filename = f'evaluation_summary_{dataset_suffix}_{timestamp}.csv'
+        subject_summary_filename = f'evaluation_summary_by_subject_{dataset_suffix}_{timestamp}.csv'
+        
+        results_df.to_csv(os.path.join(RESULTS_PATH, results_filename), index=False)
+        summary_df.to_csv(os.path.join(RESULTS_PATH, summary_filename), index=False)
+        subject_summary_df.to_csv(os.path.join(RESULTS_PATH, subject_summary_filename), index=False)
     
     if args.plot:
         visualization.generate_all_plots(all_results, summary_df)
@@ -565,26 +642,27 @@ def main():
                 
             features_dict = all_features_dict[subject_id]
             
-            # Load data to get labels
-            X, y, meta = data_loader.load_single_subject_moabb(subject_id, use_test_data=args.use_test_data, dataset=args.dataset)
+            # Load data to get labels (features are from training data, so use training labels)
+            X_train, y_train, meta = data_loader.load_single_subject_moabb(subject_id, use_test_data=False, dataset=args.dataset)
+            X_test, y_test, _ = data_loader.load_single_subject_moabb(subject_id, use_test_data=True, dataset=args.dataset)
             
             print(f"\nGenerating t-SNE visualizations for Subject {subject_id}...")
             
-            # Generate individual t-SNE plots for each algorithm
+            # Generate individual t-SNE plots for each algorithm (training features + training labels)
             for algo_name in args.algorithms:
                 if algo_name in features_dict:
                     features = features_dict[algo_name]
-                    tsne_filename = get_timestamped_filename(f'tsne_{args.dataset.lower()}_subject{subject_id}_{algo_name.replace("+", "_").replace("-", "_")}', 'png')
+                    tsne_filename = f'tsne_{args.dataset.lower()}_subject{subject_id}_{algo_name.replace("+", "_").replace("-", "_")}_{timestamp}.png'
                     save_path = os.path.join(RESULTS_PATH, tsne_filename)
                     visualization.plot_tsne_visualization(
-                        features, y, algo_name, subject_id, args.dataset, save_path=save_path
+                        features, y_train, algo_name, subject_id, args.dataset, save_path=save_path
                     )
             
-            # Generate comparison t-SNE plot with all algorithms
-            comparison_filename = get_timestamped_filename(f'tsne_comparison_{args.dataset.lower()}_subject{subject_id}', 'png')
+            # Generate comparison t-SNE plot with all algorithms (training features + training labels)
+            comparison_filename = f'tsne_comparison_{args.dataset.lower()}_subject{subject_id}_{timestamp}.png'
             save_path = os.path.join(RESULTS_PATH, comparison_filename)
             visualization.plot_tsne_comparison(
-                features_dict, y, args.algorithms, subject_id, args.dataset, save_path=save_path
+                features_dict, y_train, args.algorithms, subject_id, args.dataset, save_path=save_path
             )
         
         print("\nt-SNE visualizations complete!")
@@ -592,14 +670,15 @@ def main():
     print("\n" + "=" * 80)
     print("Evaluation task complete!")
     print("=" * 80)
-    print("\nResult files:")
-    print(f"  Detailed results: {os.path.join(RESULTS_PATH, results_filename)}")
-    print(f"  Summary: {os.path.join(RESULTS_PATH, summary_filename)}")
-    print(f"  Subject-wise summary: {os.path.join(RESULTS_PATH, subject_summary_filename)}")
-    if args.plot:
-        print(f"  Plots: {RESULTS_PATH}/ directory")
-    if args.tsne:
-        print(f"  t-SNE visualizations: {RESULTS_PATH}/ directory")
+    if not args.tsne:
+        print("\nResult files:")
+        print(f"  Detailed results: {os.path.join(RESULTS_PATH, results_filename)}")
+        print(f"  Summary: {os.path.join(RESULTS_PATH, summary_filename)}")
+        print(f"  Subject-wise summary: {os.path.join(RESULTS_PATH, subject_summary_filename)}")
+        if args.plot:
+            print(f"  Plots: {RESULTS_PATH}/ directory")
+    else:
+        print(f"\n  t-SNE visualizations: {RESULTS_PATH}/ directory")
 
 
 if __name__ == '__main__':

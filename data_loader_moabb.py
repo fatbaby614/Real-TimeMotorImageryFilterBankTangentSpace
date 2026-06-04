@@ -172,8 +172,34 @@ def load_physionet_mi_moabb(subjects=None, use_test_data=False):
             subject_data = raw_data[subject_id]
             print(f"Processing subject {subject_id}: {list(subject_data.keys())}")
             
-            # 处理每个session
-            for session_name, sessions in subject_data.items():
+            # PhysionetMI cross-session protocol: use first session for train, second for test
+            # Sort sessions to ensure consistent ordering
+            sorted_session_names = sorted(subject_data.keys())
+            print(f"  Available sessions: {sorted_session_names}")
+            
+            # Collect subject data first (for single-session case, load ALL then split per class)
+            subject_X = []
+            subject_y = []
+            subject_meta = []
+            
+            # Select sessions based on use_test_data flag
+            if len(sorted_session_names) >= 2:
+                # Multiple sessions available: use separate sessions for train/test
+                if use_test_data:
+                    target_sessions = sorted_session_names[1:2]
+                    print(f"  Selecting TEST sessions: {target_sessions}")
+                else:
+                    target_sessions = sorted_session_names[0:1]
+                    print(f"  Selecting TRAIN sessions: {target_sessions}")
+            else:
+                # Only 1 session available (e.g., PhysionetMI):
+                # Load ALL data first, then do stratified per-class split
+                target_sessions = [sorted_session_names[0]]
+                print(f"  Single session detected: will load all runs then stratified split per class")
+            
+            # 处理每个选定的session
+            for session_name in target_sessions:
+                sessions = subject_data[session_name]
                 print(f"  Processing session: {session_name}")
                 
                 # 处理每个run
@@ -221,9 +247,9 @@ def load_physionet_mi_moabb(subjects=None, use_test_data=False):
                                     b, a = signal.butter(4, [LOW_FREQ, HIGH_FREQ], btype='band', fs=sfreq)
                                     data = signal.filtfilt(b, a, data, axis=1)
                                     
-                                    all_X.append(data)
-                                    all_y.append(label)
-                                    all_meta.append({
+                                    subject_X.append(data)
+                                    subject_y.append(label)
+                                    subject_meta.append({
                                         'subject': subject_id,
                                         'session': session_name,
                                         'run': run_id,
@@ -233,6 +259,50 @@ def load_physionet_mi_moabb(subjects=None, use_test_data=False):
                                     continue
                     else:
                         print(f"    No annotations found in run {run_id}")
+            
+            # For single-session datasets, do stratified per-class split
+            if len(sorted_session_names) < 2:
+                subject_X_arr = np.array(subject_X)
+                subject_y_arr = np.array(subject_y)
+                subject_meta_df = pd.DataFrame(subject_meta)
+                
+                print(f"  Stratified split: {len(subject_X_arr)} total trials")
+                unique_classes = np.unique(subject_y_arr)
+                print(f"    Classes: {unique_classes}")
+                
+                selected_X = []
+                selected_y = []
+                selected_meta = []
+                
+                for cls in unique_classes:
+                    cls_indices = np.where(subject_y_arr == cls)[0]
+                    # Shuffle indices deterministically for reproducible split
+                    rng = np.random.RandomState(42)
+                    rng.shuffle(cls_indices)
+                    
+                    split_point = len(cls_indices) // 2
+                    if not use_test_data:
+                        cls_selected = cls_indices[:split_point]
+                        print(f"    Class {cls}: {len(cls_indices)} trials -> TRAIN: {len(cls_selected)}")
+                    else:
+                        cls_selected = cls_indices[split_point:]
+                        print(f"    Class {cls}: {len(cls_indices)} trials -> TEST: {len(cls_selected)}")
+                    
+                    for idx in cls_selected:
+                        selected_X.append(subject_X_arr[idx])
+                        selected_y.append(subject_y_arr[idx])
+                        selected_meta.append(subject_meta_df.iloc[idx].to_dict())
+                
+                all_X.extend(selected_X)
+                all_y.extend(selected_y)
+                all_meta.extend(selected_meta)
+                
+                print(f"  Subject {subject_id}: {len(selected_X)} selected trials, classes={np.unique(selected_y)}")
+            else:
+                # Multiple sessions: add all collected data directly
+                all_X.extend(subject_X)
+                all_y.extend(subject_y)
+                all_meta.extend(subject_meta)
         
         if not all_X:
             raise ValueError("No valid trials found in PhysionetMI data")
@@ -290,8 +360,33 @@ def load_schirrmeister2017_moabb(subjects=None, use_test_data=False):
             subject_data = raw_data[subject_id]
             print(f"Processing subject {subject_id}: {list(subject_data.keys())}")
             
-            # 处理每个session
-            for session_name, sessions in subject_data.items():
+            # Schirrmeister2017 cross-session protocol: use first session for train, second for test
+            # Sort sessions to ensure consistent ordering
+            sorted_session_names = sorted(subject_data.keys())
+            print(f"  Available sessions: {sorted_session_names}")
+            
+            # Collect subject data first (for single-session case, load ALL then split per class)
+            subject_X = []
+            subject_y = []
+            subject_meta = []
+            
+            # Select sessions based on use_test_data flag
+            if len(sorted_session_names) >= 2:
+                # Multiple sessions available: use separate sessions for train/test
+                if use_test_data:
+                    target_sessions = sorted_session_names[1:2]
+                    print(f"  Selecting TEST sessions: {target_sessions}")
+                else:
+                    target_sessions = sorted_session_names[0:1]
+                    print(f"  Selecting TRAIN sessions: {target_sessions}")
+            else:
+                # Only 1 session available: load ALL data first, then stratified per-class split
+                target_sessions = [sorted_session_names[0]]
+                print(f"  Single session detected: will load all runs then stratified split per class")
+            
+            # 处理每个选定的session
+            for session_name in target_sessions:
+                sessions = subject_data[session_name]
                 print(f"  Processing session: {session_name}")
                 
                 # 处理每个run
@@ -339,9 +434,9 @@ def load_schirrmeister2017_moabb(subjects=None, use_test_data=False):
                                     b, a = signal.butter(4, [LOW_FREQ, HIGH_FREQ], btype='band', fs=sfreq)
                                     data = signal.filtfilt(b, a, data, axis=1)
                                     
-                                    all_X.append(data)
-                                    all_y.append(label)
-                                    all_meta.append({
+                                    subject_X.append(data)
+                                    subject_y.append(label)
+                                    subject_meta.append({
                                         'subject': subject_id,
                                         'session': session_name,
                                         'run': run_id,
@@ -351,6 +446,48 @@ def load_schirrmeister2017_moabb(subjects=None, use_test_data=False):
                                     continue
                     else:
                         print(f"    No annotations found in run {run_id}")
+            
+            # For single-session datasets, do stratified per-class split
+            if len(sorted_session_names) < 2:
+                subject_X_arr = np.array(subject_X)
+                subject_y_arr = np.array(subject_y)
+                subject_meta_df = pd.DataFrame(subject_meta)
+                
+                print(f"  Stratified split: {len(subject_X_arr)} total trials")
+                unique_classes = np.unique(subject_y_arr)
+                print(f"    Classes: {unique_classes}")
+                
+                selected_X = []
+                selected_y = []
+                selected_meta = []
+                
+                for cls in unique_classes:
+                    cls_indices = np.where(subject_y_arr == cls)[0]
+                    rng = np.random.RandomState(42)
+                    rng.shuffle(cls_indices)
+                    
+                    split_point = len(cls_indices) // 2
+                    if not use_test_data:
+                        cls_selected = cls_indices[:split_point]
+                        print(f"    Class {cls}: {len(cls_indices)} trials -> TRAIN: {len(cls_selected)}")
+                    else:
+                        cls_selected = cls_indices[split_point:]
+                        print(f"    Class {cls}: {len(cls_indices)} trials -> TEST: {len(cls_selected)}")
+                    
+                    for idx in cls_selected:
+                        selected_X.append(subject_X_arr[idx])
+                        selected_y.append(subject_y_arr[idx])
+                        selected_meta.append(subject_meta_df.iloc[idx].to_dict())
+                
+                all_X.extend(selected_X)
+                all_y.extend(selected_y)
+                all_meta.extend(selected_meta)
+                
+                print(f"  Subject {subject_id}: {len(selected_X)} selected trials, classes={np.unique(selected_y)}")
+            else:
+                all_X.extend(subject_X)
+                all_y.extend(subject_y)
+                all_meta.extend(subject_meta)
         
         if not all_X:
             raise ValueError("No valid trials found in Schirrmeister2017 data")
